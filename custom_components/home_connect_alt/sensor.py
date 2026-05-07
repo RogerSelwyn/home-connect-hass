@@ -1,9 +1,12 @@
-""" Implement the Sensor entities of this implementation """
+"""Implement the Sensor entities of this implementation"""
+
 from __future__ import annotations
-from datetime import datetime, timedelta, timezone
+
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
-from home_connect_async import Appliance, HomeConnect, Events, HealthStatus
+
+from home_connect_async import Appliance, Events, HealthStatus, HomeConnect
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -11,21 +14,25 @@ from homeassistant.helpers.typing import ConfigType
 
 from .common import Configuration, EntityBase, EntityManager
 from .const import (
+    CONF_TRANSLATION_MODE,
     CONF_TRANSLATION_MODE_SERVER,
     DEVICE_ICON_MAP,
     DOMAIN,
-    CONF_TRANSLATION_MODE,
     HOME_CONNECT_DEVICE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigType, async_add_entities: AddEntitiesCallback,) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigType,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Add sensors for passed config_entry in HA"""
-    #homeconnect: HomeConnect = hass.data[DOMAIN]["homeconnect"]
-    entry_conf:Configuration = hass.data[DOMAIN][config_entry.entry_id]
-    homeconnect:HomeConnect = entry_conf["homeconnect"]
+    # homeconnect: HomeConnect = hass.data[DOMAIN]["homeconnect"]
+    entry_conf: Configuration = hass.data[DOMAIN][config_entry.entry_id]
+    homeconnect: HomeConnect = entry_conf["homeconnect"]
 
     entity_manager = EntityManager(async_add_entities, "Sensor")
 
@@ -37,7 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigType, async
             entity_manager.add(device)
         if appliance.active_program:
             conf = entry_conf.get_config({"program_type": "active"})
-            device = ProgramSensor(appliance, None, conf)
+            device = ProgramSensor(appliance, None, conf, "sensor")
             entity_manager.add(device)
 
         conf = entry_conf.get_config()
@@ -54,18 +61,25 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigType, async
                     entity_manager.add(device)
 
         if appliance.status:
-            for (key, value) in appliance.status.items():
+            for key, value in appliance.status.items():
                 device = None
-                if not isinstance(value.value, bool) and conf.get_entity_setting(key, "type") != "Boolean":  # should be a binary sensor if it has a boolean value
+                if (
+                    not isinstance(value.value, bool)
+                    and conf.get_entity_setting(key, "type") != "Boolean"
+                ):  # should be a binary sensor if it has a boolean value
                     if "temperature" in key.lower():
-                        conf.set_entity_setting(key,"class","temperature")
+                        conf.set_entity_setting(key, "class", "temperature")
                     device = StatusSensor(appliance, key, conf)
                     entity_manager.add(device)
 
         if appliance.settings:
             for setting in appliance.settings.values():
                 conf = entry_conf.get_config()
-                if setting.type != "Boolean" and not isinstance(setting.value, bool) and conf.get_entity_setting(setting.key, "type") != "Boolean":
+                if (
+                    setting.type != "Boolean"
+                    and not isinstance(setting.value, bool)
+                    and conf.get_entity_setting(setting.key, "type") != "Boolean"
+                ):
                     device = SettingsSensor(appliance, setting.key, conf)
                     entity_manager.add(device)
 
@@ -75,10 +89,27 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigType, async
         entity_manager.remove_appliance(appliance)
 
     # First add the global home connect status sensor
-    async_add_entities( [ HomeConnectStatusSensor(homeconnect, "" if entry_conf["primary_config_entry"] else "_"+config_entry.entry_id) ] )
+    async_add_entities(
+        [
+            HomeConnectStatusSensor(
+                homeconnect,
+                ""
+                if entry_conf["primary_config_entry"]
+                else "_" + config_entry.entry_id,
+            )
+        ]
+    )
 
     # Subscribe for events and register the existing appliances
-    homeconnect.register_callback(add_appliance, [Events.PAIRED, Events.DATA_CHANGED, Events.PROGRAM_STARTED, Events.PROGRAM_SELECTED])
+    homeconnect.register_callback(
+        add_appliance,
+        [
+            Events.PAIRED,
+            Events.DATA_CHANGED,
+            Events.PROGRAM_STARTED,
+            Events.PROGRAM_SELECTED,
+        ],
+    )
     homeconnect.register_callback(remove_appliance, Events.DEPAIRED)
     for appliance in homeconnect.appliances.values():
         add_appliance(appliance)
@@ -86,6 +117,8 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigType, async
 
 class ProgramSensor(EntityBase, SensorEntity):
     """Selected program sensor"""
+
+    entity_type = "sensor"
 
     @property
     def unique_id(self) -> str:
@@ -112,9 +145,16 @@ class ProgramSensor(EntityBase, SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor."""
-        prog = self._appliance.selected_program if self._conf["program_type"] == "selected" else self._appliance.active_program
+        prog = (
+            self._appliance.selected_program
+            if self._conf["program_type"] == "selected"
+            else self._appliance.active_program
+        )
         if prog:
-            if (prog.name and self._conf[CONF_TRANSLATION_MODE] == CONF_TRANSLATION_MODE_SERVER):
+            if (
+                prog.name
+                and self._conf[CONF_TRANSLATION_MODE] == CONF_TRANSLATION_MODE_SERVER
+            ):
                 return prog.name
             return prog.key
         return None
@@ -126,6 +166,8 @@ class ProgramSensor(EntityBase, SensorEntity):
 
 class ProgramOptionSensor(EntityBase, SensorEntity):
     """Special active program sensor"""
+
+    entity_type = "sensor"
 
     @property
     def device_class(self) -> str:
@@ -143,9 +185,15 @@ class ProgramOptionSensor(EntityBase, SensorEntity):
 
     @property
     def name_ext(self) -> str:
-        if self._appliance.selected_program and self._key in self._appliance.selected_program.options:
+        if (
+            self._appliance.selected_program
+            and self._key in self._appliance.selected_program.options
+        ):
             return self._appliance.selected_program.options[self._key].name
-        if self._appliance.active_program and self._key in self._appliance.active_program.options:
+        if (
+            self._appliance.active_program
+            and self._key in self._appliance.active_program.options
+        ):
             return self._appliance.active_program.options[self._key].name
         return None
 
@@ -167,10 +215,16 @@ class ProgramOptionSensor(EntityBase, SensorEntity):
         """Get the original unit before manipulations"""
         unit = None
         t = None
-        if self._appliance.active_program and self._key in self._appliance.active_program.options:
+        if (
+            self._appliance.active_program
+            and self._key in self._appliance.active_program.options
+        ):
             t = self._appliance.active_program.options[self._key].type
             unit = self._appliance.active_program.options[self._key].unit
-        elif self._appliance.selected_program and self._key in self._appliance.selected_program.options:
+        elif (
+            self._appliance.selected_program
+            and self._key in self._appliance.selected_program.options
+        ):
             t = self._appliance.selected_program.options[self._key].type
             unit = self._appliance.selected_program.options[self._key].unit
         if unit is None and t in ["Double", "Float", "Int"]:
@@ -239,6 +293,8 @@ class ProgramOptionSensor(EntityBase, SensorEntity):
 class StatusSensor(EntityBase, SensorEntity):
     """Status sensor"""
 
+    entity_type = "sensor"
+
     @property
     def device_class(self) -> str:
         return f"{DOMAIN}__status"
@@ -273,7 +329,10 @@ class StatusSensor(EntityBase, SensorEntity):
         """Return the state of the sensor."""
         status = self._appliance.status.get(self._key)
         if status:
-            if status.displayvalue and self._conf[CONF_TRANSLATION_MODE] == CONF_TRANSLATION_MODE_SERVER:
+            if (
+                status.displayvalue
+                and self._conf[CONF_TRANSLATION_MODE] == CONF_TRANSLATION_MODE_SERVER
+            ):
                 return status.displayvalue
             return status.value
         return None
@@ -284,6 +343,8 @@ class StatusSensor(EntityBase, SensorEntity):
 
 class SettingsSensor(EntityBase, SensorEntity):
     """Settings sensor"""
+
+    entity_type = "sensor"
 
     @property
     def device_class(self) -> str:
@@ -322,7 +383,10 @@ class SettingsSensor(EntityBase, SensorEntity):
         """Return the state of the sensor."""
         setting = self._appliance.settings.get(self._key)
         if setting:
-            if setting.displayvalue and self._conf[CONF_TRANSLATION_MODE] == CONF_TRANSLATION_MODE_SERVER:
+            if (
+                setting.displayvalue
+                and self._conf[CONF_TRANSLATION_MODE] == CONF_TRANSLATION_MODE_SERVER
+            ):
                 return setting.displayvalue
             return setting.value
         return None
@@ -334,13 +398,15 @@ class SettingsSensor(EntityBase, SensorEntity):
 class HomeConnectStatusSensor(SensorEntity):
     """Global Home Connect status sensor"""
 
+    entity_type = "sensor"
+
     should_poll = True
     _attr_has_entity_name = True
 
-    def __init__(self, homeconnect: HomeConnect, name_suffix:str) -> None:
+    def __init__(self, homeconnect: HomeConnect, name_suffix: str) -> None:
         self._homeconnect = homeconnect
         self._name_suffix = name_suffix
-        self.entity_id = f"home_connect.{self.unique_id}"
+        self.entity_id = f"sensor.{self.unique_id}"
 
     @property
     def device_info(self):

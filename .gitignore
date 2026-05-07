@@ -6,3 +6,4 @@ __pycache__
 *.code-workspace
 
 secrets.yaml
+.DS_Store
